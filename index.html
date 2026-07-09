@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>India Climate Digital Twin</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="console">
+
+  <!-- ===== Header ===== -->
+  <header class="console-header">
+    <div class="brand">
+      <span class="brand-mark">DT</span>
+      <div class="brand-text">
+        <h1>India Climate Digital Twin</h1>
+        <p>AI-powered rainfall &amp; temperature simulation &middot; PoC console</p>
+      </div>
+    </div>
+    <div class="header-controls">
+      <label for="region-select">Pilot region</label>
+      <select id="region-select"></select>
+      <span class="status-dot" id="conn-status" title="API connection"></span>
+    </div>
+  </header>
+
+  <!-- ===== Pipeline stepper (mirrors the workflow diagram) ===== -->
+  <nav class="stepper" id="stepper">
+    <button class="step active" data-stage="collection">01 · Data Collection</button>
+    <button class="step" data-stage="processing">02 · Data Processing</button>
+    <button class="step" data-stage="model">03 · Model Development</button>
+    <button class="step" data-stage="twin">04 · Digital Twin</button>
+    <button class="step" data-stage="scenario">05 · Scenario Analysis</button>
+  </nav>
+
+  <!-- ===== KPI strip ===== -->
+  <section class="kpi-strip" id="kpi-strip">
+    <div class="kpi-card">
+      <span class="kpi-label">Processed days</span>
+      <span class="kpi-value" id="kpi-obs-count">—</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Last observation</span>
+      <span class="kpi-value" id="kpi-last-date">—</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Active model RMSE</span>
+      <span class="kpi-value" id="kpi-rmse">—</span>
+    </div>
+    <div class="kpi-card anomaly">
+      <span class="kpi-label">Latest anomaly</span>
+      <span class="kpi-value" id="kpi-anomaly">None flagged</span>
+    </div>
+  </section>
+
+  <main class="layout">
+
+    <!-- ===== Left: pipeline stage panel ===== -->
+    <section class="panel stage-panel">
+
+      <div class="stage-block" data-stage-block="collection">
+        <h2>Data Collection</h2>
+        <p class="hint">Pulls IMD gridded rainfall/temperature and INSAT products for the pilot region.</p>
+        <label>Source</label>
+        <select id="source-select"></select>
+        <div class="source-status" id="source-status"></div>
+
+        <label>Data mode</label>
+        <div class="mode-toggle">
+          <button type="button" class="mode-btn active" data-mode="synthetic">Demo (synthetic)</button>
+          <button type="button" class="mode-btn" data-mode="real">Live (real source)</button>
+        </div>
+
+        <div class="field-row">
+          <div><label>Start date</label><input type="date" id="start-date" value="2024-01-01"></div>
+          <div><label>End date</label><input type="date" id="end-date" value="2024-06-30"></div>
+        </div>
+        <button class="btn primary" id="btn-ingest">Ingest data</button>
+        <pre class="log" id="log-ingest"></pre>
+      </div>
+
+      <div class="stage-block hidden" data-stage-block="processing">
+        <h2>Data Processing</h2>
+        <p class="hint">Aggregates raw grid cells into one clean daily record per region and interpolates gaps.</p>
+        <button class="btn primary" id="btn-process">Run processing</button>
+        <pre class="log" id="log-process"></pre>
+      </div>
+
+      <div class="stage-block hidden" data-stage-block="model">
+        <h2>Model Development</h2>
+        <p class="hint">Trains a baseline model (seasonal + lag features) per climate variable and validates on a held-out trailing window.</p>
+        <label>Target variable</label>
+        <select id="target-select">
+          <option value="rainfall_mm">Rainfall (mm)</option>
+          <option value="temp_max_c">Max temperature (°C)</option>
+          <option value="temp_min_c">Min temperature (°C)</option>
+        </select>
+        <button class="btn primary" id="btn-train">Train &amp; validate</button>
+        <pre class="log" id="log-train"></pre>
+      </div>
+
+      <div class="stage-block hidden" data-stage-block="twin">
+        <h2>Digital Twin Simulator</h2>
+        <p class="hint">Blends recent observations with a short model-driven forecast and flags anomalies against seasonal climatology.</p>
+        <label>Forecast horizon (days)</label>
+        <input type="number" id="forecast-days" value="7" min="1" max="30">
+        <button class="btn primary" id="btn-simulate">Run digital twin</button>
+        <pre class="log" id="log-twin"></pre>
+      </div>
+
+      <div class="stage-block hidden" data-stage-block="scenario">
+        <h2>Scenario Analysis — What-if simulator</h2>
+        <p class="hint">Perturbs the twin's forecast to explore "what if the monsoon is weaker" or "what if it's hotter" conditions.</p>
+        <label>Rainfall change <span id="rain-delta-val">0%</span></label>
+        <input type="range" id="rain-delta" min="-60" max="60" value="0" step="5">
+        <label>Temperature change <span id="temp-delta-val">0.0°C</span></label>
+        <input type="range" id="temp-delta" min="-5" max="5" value="0" step="0.5">
+        <label>Horizon (days)</label>
+        <input type="number" id="scenario-horizon" value="14" min="1" max="30">
+        <button class="btn primary" id="btn-scenario">Run scenario</button>
+        <pre class="log" id="log-scenario"></pre>
+      </div>
+
+    </section>
+
+    <!-- ===== Right: visualization ===== -->
+    <section class="panel viz-panel">
+      <div class="viz-block">
+        <h3>Pilot region grid — latest rainfall</h3>
+        <div id="map"></div>
+      </div>
+      <div class="viz-block">
+        <h3>Actual vs. predicted (validation window)</h3>
+        <canvas id="validation-chart" height="140"></canvas>
+      </div>
+      <div class="viz-block">
+        <h3>Digital twin: observed + forecast state</h3>
+        <canvas id="twin-chart" height="140"></canvas>
+      </div>
+      <div class="viz-block hidden" id="scenario-viz-block">
+        <h3>Scenario vs. baseline</h3>
+        <canvas id="scenario-chart" height="140"></canvas>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="console-footer">
+    Backend: FastAPI + SQLAlchemy (SQLite) &middot; Model: scikit-learn RandomForest baseline (swap-in ready for TensorFlow/PyTorch) &middot; Frontend: vanilla JS + Leaflet + Chart.js
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+<script src="js/api.js"></script>
+<script src="js/map.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
